@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel de Acessibilidade - Morse IoT</title>
+  <!-- Biblioteca Paho MQTT JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+  <style src="style.css"></style>
+</head>
+
+<body>
+  <header>
+    <h1>Acessibilidade Morse IoT</h1>
+    <div id="status" class="status-card status-desconectado">Conectando ao Broker...</div>
+  </header>
+  <main class="main-card">
+    <div class="label">Mensagem Traduzida em Tempo Real:</div>
+    <div id="displayTexto" class="display-texto">Aguardando sinais...</div>
+    <div class="info-footer">
+      <span>
+        Último evento:
+        <strong id="ultimoEvento">-</strong>
+      </span>
+      <span>
+        Tópico:
+        <code>morse/texto</code>
+      </span>
+    </div>
+  </main>
+  <script>
+    // Configurações do Broker MQTT (Substitua pelo IP da sua Raspberry Pi se necessário)
+    const host = window.location.hostname || "localhost";
+    const port = 9001; // Porta WebSocket configurada no Mosquitto
+    const clientId = "WebClient_" + Math.random().toString(16).substr(2, 8);
+
+    const client = new Paho.MQTT.Client(host, Number(port), clientId);
+
+    client.onConnectionLost = onConnectionLost;
+    client.onMessageArrived = onMessageArrived;
+
+    // Conectar ao Broker MQTT
+    client.connect({
+      onSuccess: onConnect,
+      onFailure: onFailure
+    });
+
+    function onConnect() {
+      console.log("Conectado ao Broker MQTT via WebSockets!");
+      const statusElement = document.getElementById("status");
+      statusElement.innerText = "Online (MQTT)";
+      statusElement.className = "status-card status-conectado";
+
+      // Inscreve no tópico do Morse
+      client.subscribe("morse/texto");
+    }
+
+    function onFailure(responseObject) {
+      console.log("Falha ao conectar: " + responseObject.errorMessage);
+      const statusElement = document.getElementById("status");
+      statusElement.innerText = "Erro na Conexão";
+      statusElement.className = "status-card status-desconectado";
+    }
+
+    function onConnectionLost(responseObject) {
+      if (responseObject.errorCode !== 0) {
+        console.log("Conexão perdida: " + responseObject.errorMessage);
+        const statusElement = document.getElementById("status");
+        statusElement.innerText = "Desconectado";
+        statusElement.className = "status-card status-desconectado";
+      }
+    }
+
+    // Processa a mensagem recebida do Python
+    function onMessageArrived(message) {
+      try {
+        const payload = JSON.parse(message.payloadString);
+
+        const display = document.getElementById("displayTexto");
+        const ultimoEvento = document.getElementById("ultimoEvento");
+
+        // Atualiza a tela com o texto completo enviado pelo Python
+        if (payload.texto_completo && payload.texto_completo.trim() !== "") {
+          display.innerText = payload.texto_completo;
+        } else {
+          display.innerText = "(Texto vazio)";
+        }
+
+        ultimoEvento.innerText = payload.ultimo_evento || "Atualizado";
+
+      } catch (e) {
+        console.error("Erro ao processar JSON:", e);
+      }
+    }
+
+    async function carregarHistoricoDoBanco() {
+      try {
+        const resposta = await fetch('http://localhost:5000/api/historico');
+        const dados = await resposta.json();
+        console.log("Histórico resgatado do Banco de Dados:", dados);
+      } catch (erro) {
+        console.error("Erro ao buscar histórico do banco:", erro);
+      }
+    }
+
+    // Executa ao carregar a página
+    carregarHistoricoDoBanco();
+  </script>
+</body>
+
+</html>
