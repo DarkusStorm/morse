@@ -5,108 +5,120 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Painel de Acessibilidade - Morse IoT</title>
-  <!-- Biblioteca Paho MQTT JS -->
+  <link rel="stylesheet" href="styles.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
-  <style src="style.css"></style>
 </head>
-
 <body>
+
   <header>
     <h1>Acessibilidade Morse IoT</h1>
-    <div id="status" class="status-card status-desconectado">Conectando ao Broker...</div>
+    <div id="status" class="status-card status-desconectado">Conectando Broker...</div>
   </header>
-  <main class="main-card">
-    <div class="label">Mensagem Traduzida em Tempo Real:</div>
+
+  <main class="card">
+    <div class="label">Mensagem em Tempo Real (MQTT WebSocket)</div>
     <div id="displayTexto" class="display-texto">Aguardando sinais...</div>
-    <div class="info-footer">
-      <span>
-        Último evento:
-        <strong id="ultimoEvento">-</strong>
-      </span>
-      <span>
-        Tópico:
-        <code>morse/texto</code>
-      </span>
-    </div>
   </main>
+
+  <section class="card">
+    <div class="header-tabela">
+      <div class="label" style="margin: 0;">Histórico de Registros (API / Banco SQLite)</div>
+      <button class="btn-atualizar" onclick="carregarHistoricoDoBanco()">Atualizar Tabela</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Evento</th>
+          <th>Resultado</th>
+          <th>Data / Hora</th>
+        </tr>
+      </thead>
+      <tbody id="tabelaCorpo">
+        <tr>
+          <td colspan="4" style="text-align: center; color: #888;">Carregando histórico do banco...</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
   <script>
-    // Configurações do Broker MQTT (Substitua pelo IP da sua Raspberry Pi se necessário)
-    const host = window.location.hostname || "localhost";
-    const port = 9001; // Porta WebSocket configurada no Mosquitto
-    const clientId = "WebClient_" + Math.random().toString(16).substr(2, 8);
+    const API_URL = "http://" + (window.location.hostname || "192.168.137.138") + ":5000/api/historico";
+    const MQTT_HOST = window.location.hostname || "192.168.137.138";
+    const MQTT_PORT = 9001;
 
-    const client = new Paho.MQTT.Client(host, Number(port), clientId);
+    // Conexão MQTT
+    const client = new Paho.MQTT.Client(MQTT_HOST, Number(MQTT_PORT), "Web_" + Math.random().toString(16).substr(2, 8));
 
-    client.onConnectionLost = onConnectionLost;
-    client.onMessageArrived = onMessageArrived;
+    client.onConnectionLost = () => {
+      document.getElementById("status").innerText = "Desconectado";
+      document.getElementById("status").className = "status-card status-desconectado";
+    };
 
-    // Conectar ao Broker MQTT
-    client.connect({
-      onSuccess: onConnect,
-      onFailure: onFailure
-    });
-
-    function onConnect() {
-      console.log("Conectado ao Broker MQTT via WebSockets!");
-      const statusElement = document.getElementById("status");
-      statusElement.innerText = "Online (MQTT)";
-      statusElement.className = "status-card status-conectado";
-
-      // Inscreve no tópico do Morse
-      client.subscribe("morse/texto");
-    }
-
-    function onFailure(responseObject) {
-      console.log("Falha ao conectar: " + responseObject.errorMessage);
-      const statusElement = document.getElementById("status");
-      statusElement.innerText = "Erro na Conexão";
-      statusElement.className = "status-card status-desconectado";
-    }
-
-    function onConnectionLost(responseObject) {
-      if (responseObject.errorCode !== 0) {
-        console.log("Conexão perdida: " + responseObject.errorMessage);
-        const statusElement = document.getElementById("status");
-        statusElement.innerText = "Desconectado";
-        statusElement.className = "status-card status-desconectado";
-      }
-    }
-
-    // Processa a mensagem recebida do Python
-    function onMessageArrived(message) {
+    client.onMessageArrived = (message) => {
       try {
         const payload = JSON.parse(message.payloadString);
-
-        const display = document.getElementById("displayTexto");
-        const ultimoEvento = document.getElementById("ultimoEvento");
-
-        // Atualiza a tela com o texto completo enviado pelo Python
-        if (payload.texto_completo && payload.texto_completo.trim() !== "") {
-          display.innerText = payload.texto_completo;
-        } else {
-          display.innerText = "(Texto vazio)";
-        }
-
-        ultimoEvento.innerText = payload.ultimo_evento || "Atualizado";
-
+        document.getElementById("displayTexto").innerText = payload.texto_completo || "(Texto vazio)";
+        
+        carregarHistoricoDoBanco();
       } catch (e) {
-        console.error("Erro ao processar JSON:", e);
+        console.error("Erro JSON MQTT:", e);
       }
-    }
+    };
+
+    client.connect({
+      onSuccess: () => {
+        document.getElementById("status").innerText = "Online (MQTT)";
+        document.getElementById("status").className = "status-card status-conectado";
+        client.subscribe("morse/texto");
+      },
+      onFailure: () => {
+        document.getElementById("status").innerText = "Erro MQTT";
+      }
+    });
 
     async function carregarHistoricoDoBanco() {
       try {
-        const resposta = await fetch('http://localhost:5000/api/historico');
-        const dados = await resposta.json();
-        console.log("Histórico resgatado do Banco de Dados:", dados);
+        const resposta = await fetch(API_URL);
+        const resultado = await resposta.json();
+
+        if (resultado.status === "sucesso") {
+          renderizarTabela(resultado.dados);
+        }
       } catch (erro) {
-        console.error("Erro ao buscar histórico do banco:", erro);
+        console.error("Erro ao conectar na API:", erro);
+        document.getElementById("tabelaCorpo").innerHTML = `
+          <tr>
+            <td colspan="4" style="text-align: center; color: #e74c3c;">Falha ao carregar dados da API.</td>
+          </tr>`;
       }
     }
 
-    // Executa ao carregar a página
+    function renderizarTabela(dados) {
+      const tbody = document.getElementById("tabelaCorpo");
+      if (dados.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center;">Nenhum registro encontrado no banco.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = dados.map(item => {
+        let classeBadge = "badge-inserir";
+        if (item.evento.includes("DELETAR")) classeBadge = "badge-deletar";
+        if (item.evento.includes("ESPAÇO")) classeBadge = "badge-espaco";
+
+        return `
+          <tr>
+            <td><strong>#${item.id}</strong></td>
+            <td><span class="badge ${classeBadge}">${item.evento}</span></td>
+            <td><code>${item.texto_resultado || "(vazio)"}</code></td>
+            <td>${item.timestamp}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
     carregarHistoricoDoBanco();
   </script>
 </body>
-
 </html>
